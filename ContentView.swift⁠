@@ -1,0 +1,112 @@
+import SwiftUI
+import HealthKit
+
+struct ContentView: View {
+    @State private var stepInput: String = "2000"
+    @State private var statusMessage: String = "Sẵn sàng nhận số liệu trực tiếp..."
+    @State private var isInjecting: Bool = false
+    
+    private let healthStore = HKHealthStore()
+
+    var body: some View {
+        NavigationView {
+            Form {
+                Section(header: Text("Nhập số bước chính xác")) {
+                    TextField("Nhập số lượng bước muốn thêm", text: $stepInput)
+                        .keyboardType(.numberPad)
+                    Text("💡 Gõ bao nhiêu, hệ thống bơm chuẩn xác bấy nhiêu vào Health app.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                
+                Section {
+                    Button(action: {
+                        requestAndInjectSteps()
+                    }) {
+                        if isInjecting {
+                            HStack {
+                                ProgressView()
+                                    .padding(.trailing, 5)
+                                Text("Đang tiêm dữ liệu...")
+                            }
+                        } else {
+                            Text("Bơm chính xác số bước")
+                                .bold()
+                        }
+                    }
+                    .disabled(isInjecting)
+                }
+                
+                Section(header: Text("Trạng thái hệ thống")) {
+                    Text(statusMessage)
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .navigationTitle("Direct Step Injector")
+        }
+    }
+
+    func requestAndInjectSteps() {
+        guard HKHealthStore.isHealthDataAvailable() else {
+            statusMessage = "[-] Thiết bị không hỗ trợ HealthKit!"
+            return
+        }
+
+        guard let stepQuantityType = HKQuantityType.quantityType(forIdentifier: .stepCount) else {
+            statusMessage = "[-] Không thể khởi tạo loại dữ liệu bước chân."
+            return
+        }
+
+        let typesToShare: Set = [stepQuantityType]
+        let typesToRead: Set = [stepQuantityType]
+
+        isInjecting = true
+        statusMessage = "[*] Đang yêu cầu quyền HealthKit..."
+
+        healthStore.requestAuthorization(toShare: typesToShare, read: typesToRead) { success, error in
+            DispatchQueue.main.async {
+                if success {
+                    self.executeDirectInjection()
+                } else {
+                    self.isInjecting = false
+                    statusMessage = "[-] Bị từ chối quyền: \(error?.localizedDescription ?? "Không rõ lỗi")"
+                }
+            }
+        }
+    }
+
+    func executeDirectInjection() {
+        guard let exactSteps = Double(stepInput), exactSteps > 0 else {
+            isInjecting = false
+            statusMessage = "[-] Số bước nhập vào không hợp lệ!"
+            return
+        }
+
+        guard let stepQuantityType = HKQuantityType.quantityType(forIdentifier: .stepCount) else { return }
+
+        let calendar = Calendar.current
+        let now = Date()
+        
+        guard let startDate = calendar.date(byAdding: .minute, value: -30, to: now),
+              let endDate = now else {
+            isInjecting = false
+            statusMessage = "[-] Lỗi tính toán thời gian."
+            return
+        }
+
+        let quantity = HKQuantity(unit: HKUnit.count(), doubleValue: exactSteps)
+        let sample = HKQuantitySample(type: stepQuantityType, quantity: quantity, start: startDate, end: endDate)
+
+        healthStore.save([sample]) { success, error in
+            DispatchQueue.main.async {
+                self.isInjecting = false
+                if success {
+                    self.statusMessage = "[+] Đã tiêm thành công chuẩn xác \(Int(exactSteps)) bước vào Apple Health!"
+                } else {
+                    self.statusMessage = "[-] Lỗi khi lưu dữ liệu: \(error?.localizedDescription ?? "")"
+                }
+            }
+        }
+    }
+}
