@@ -1,0 +1,43 @@
+name: Build iOS IPA
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Compile and Package IPA
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Xcode version
+        run: |
+          sudo xcode-select -s /Applications/Xcode.app
+          xcodebuild -version
+
+      - name: Build Archive
+        run: |
+          xcodebuild -scheme "HealthInjector" \
+                     -sdk iphoneos \
+                     -configuration Release \
+                     -archivePath $PWD/build/HealthInjector.xcarchive \
+                     archive \
+                     CODE_SIGN_IDENTITY="" \
+                     CODE_SIGNING_ALLOWED=NO
+
+      - name: Export IPA
+        run: |
+          mkdir -p $PWD/build/Payload
+          mv $PWD/build/HealthInjector.xcarchive/Products/Applications/*.app $PWD/build/Payload/
+          cd $PWD/build
+          zip -r HealthInjector.ipa Payload
+          
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: HealthInjector-IPA
+          path: build/HealthInjector.ipa
